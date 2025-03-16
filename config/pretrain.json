@@ -1,0 +1,6 @@
+{
+  "max_len": 512,
+  "model_name": "gpt2",
+  "tokenizer_name": "bert-base-chinese",
+  "model_path":"../model/dorami"
+}
