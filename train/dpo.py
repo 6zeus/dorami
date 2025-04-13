@@ -3,53 +3,50 @@ import json
 import argparse
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTTrainer, DataCollatorForCompletionOnlyLM, SFTConfig
-
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+from trl import DPOTrainer, DPOConfig
 
 
-def formatting_prompt(sample):
-    instruction = sample["INSTRUCTION"]
-    input = sample.get("INPUT", "")
-    response = sample["RESPONSE"]
-    prompt = f"### Instruction:\n{instruction}\n### Input:\n{input}\n### Response:\n{response}\n"
-    return prompt
+def formatting(sample):
+    prompt = f"### Instruction:\n{sample['prompt']}### Input:\n\n### Response:\n"
+    chosen = f"{sample['chosen']}\n"
+    rejected = f"{sample['rejected']}\n"
+    return {"prompt": prompt, "chosen": chosen, "rejected": rejected}
 
 
 def create_dataset(config):
-    dataset = load_dataset("wangrui6/Zhihu-KOL", split="train")
+    dataset = load_dataset("liyucheng/zhihu_rlhf_3k", split="train")
     dataset = dataset.train_test_split(test_size=0.1)
     return dataset
 
 
 def create_trainingArguments(config):
-    training_args = SFTConfig(
+    training_args = DPOConfig(
         output_dir=config["output_dir"],
         eval_strategy="epoch",
         save_strategy="steps",
-        save_steps=5000,
-        logging_steps=2000,
+        save_steps=1000,
+        logging_steps=1000,
         learning_rate=5e-5,
         save_total_limit=2,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
-        num_train_epochs=2,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        num_train_epochs=3,
         weight_decay=0.01,
         logging_dir='./logs',
         report_to=[],
-        max_seq_length=512
+        max_length=512
     )
     return training_args
 
 
-def create_trainer(model, training_args, data_collator, dataset, formatting_func):
-    trainer = SFTTrainer(
+def create_trainer(model, ref_model, training_args, dataset, tokenizer):
+    trainer = DPOTrainer(
         model=model,
+        ref_model=ref_model,
         args=training_args,
-        data_collator=data_collator,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        formatting_func=formatting_func,
+        processing_class=tokenizer
     )
     return trainer
 
@@ -62,13 +59,13 @@ def load_config(config_path):
     return config
 
 
-def sft():
-    parser = argparse.ArgumentParser(description="sft config")
+def dpo():
+    parser = argparse.ArgumentParser(description="dpo config")
     parser.add_argument(
         '--config',
         type=str,
         required=True,
-        help="指定配置文件的路径，例如: config/sft.json"
+        help="指定配置文件的路径，例如: config/dpo.json"
     )
     args = parser.parse_args()
     config = load_config(args.config)
@@ -78,15 +75,14 @@ def sft():
     output_dir = config["output_dir"]
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForCausalLM.from_pretrained(model_path)
+    ref_model = AutoModelForCausalLM.from_pretrained(model_path)
     training_args = create_trainingArguments(config)
-    response_template = "### Response:\n"
-    data_collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer, mlm=False)
     dataset = create_dataset(config)
-    trainer = create_trainer(model, training_args, data_collator, dataset, formatting_prompt)
+    trainer = create_trainer(model, ref_model, training_args, dataset, tokenizer)
     trainer.train()
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
 
 
 if __name__ == '__main__':
-    sft()
+    dpo()

@@ -1,0 +1,4 @@
+{
+  "model_path":"./model/dorami-instruct",
+  "output_dir": "./model/dorami-chat"
+}
